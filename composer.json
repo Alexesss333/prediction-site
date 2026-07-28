@@ -1,0 +1,15 @@
+{
+    "name": "predictionsite/app",
+    "description": "Polymarket-style prediction market: news+templates -> AI events, image generation, admin",
+    "type": "project",
+    "license": "proprietary",
+    "require": {
+        "php": ">=8.2"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11.0"
+    },
+    "scripts": {
+        "test": "phpunit"
+    }
+}

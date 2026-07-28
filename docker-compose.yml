@@ -1,0 +1,10 @@
+services:
+  web:
+    build: .
+    container_name: prediction-site
+    ports:
+      - "8080:8080"
+    volumes:
+      # mount the whole project so edits on the host are live (no rebuild needed)
+      - .:/app
+    restart: unless-stopped

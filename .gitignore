@@ -1,0 +1,23 @@
+# зависимости и кэш тестов
+/vendor/
+/.phpunit.cache/
+
+# секреты и рантайм-данные (генерируются приложением)
+/data/config.json
+/data/news.json
+/data/events.json
+/data/rank.json
+/data/usage.json
+/data/img_usage.json
+/data/img_keys.json
+/data/prices.json
+/data/schedules.json
+/data/asset_gen.json
+/data/categories.json
+/data/pending.json
+/data/publish_state.json
+/data/genimg/
+/data/logos/_cand/
+
+# упакованные образы
+*.tar

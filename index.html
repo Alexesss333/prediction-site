@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Prediction — события</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="wrap wrap-wide">
+  <div class="top">
+    <h1>🔮 События</h1>
+    <span class="pill" id="count">0 событий</span>
+    <div class="sp"></div>
+    <button class="btn" onclick="load()">⟳ Обновить</button>
+    <a class="btn primary" href="admin.html">⚙ Админка</a>
+  </div>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="feed-body">
+    <nav class="feed-side" id="feed_side">
+      <div class="fs-title">🔴 Лайв-каналы</div>
+      <div id="side_tabs"></div>
+    </nav>
+    <div class="feed-main">
+      <div class="tabs" id="tabs"></div>
+      <div class="grid" id="grid"></div>
+      <div class="pager" id="pager"></div>
+      <div class="empty" id="empty" style="display:none">
+        Событий пока нет.<br>Открой <a href="admin.html">Админку</a> и нажми кнопку авто-генерации.
+      </div>
+    </div>
+  </div>
+</div>
+<script src="assets/app.js"></script>
+</body>
+</html>

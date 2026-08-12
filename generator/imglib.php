@@ -29,11 +29,15 @@ function img_cfg(){
 /* нормализованный список ключей провайдера: cloudflare => [['account','token'],...], иначе => [str,...] */
 function img_provider_keys($provider, $cfg){
     if ($provider==='cloudflare'){
-        $out = [];
+        $free = []; $paid = [];
         foreach ((array)($cfg['cf_keys'] ?? []) as $e){
-            if (is_array($e) && !empty($e['token'])) $out[] = ['account'=>$e['account']??'', 'token'=>$e['token']];
+            if (!is_array($e) || empty($e['token'])) continue;
+            $k = ['account'=>$e['account']??'', 'token'=>$e['token'], 'paid'=>!empty($e['paid'])];
+            // Платные аккаунты — в конец: сначала выбираем бесплатные суточные
+            // нормы, и только когда все они исчерпаны, тратим деньги.
+            if ($k['paid']) $paid[] = $k; else $free[] = $k;
         }
-        return $out;
+        return array_merge($free, $paid);
     }
     $field = $provider==='together' ? 'together_keys' : ($provider==='segmind' ? 'segmind_keys' : '');
     if ($field==='') return [];
@@ -155,7 +159,11 @@ function img_generate_raw($prompt, $w, $seed, $provider, $cfg, &$err){
     $store = img_status_load();
     $n = count($keys);
     $pref = (int)($store['pref'][$provider] ?? 0); if ($pref<0 || $pref>=$n) $pref = 0;
-    $order = []; for ($j=0;$j<$n;$j++) $order[] = ($pref + $j) % $n;   // начинаем с последнего рабочего
+    // Начинаем с последнего рабочего — но только среди бесплатных. Иначе,
+    // один раз отработав, платный аккаунт становится предпочтительным и
+    // деньги тратятся, пока бесплатные суточные нормы стоят нетронутыми.
+    if (!empty($keys[$pref]['paid'])) $pref = 0;
+    $order = []; for ($j=0;$j<$n;$j++) $order[] = ($pref + $j) % $n;
     $now = time(); $skipped = []; $lastErr = '';
 
     // проход 1: пропускаем ключи в кулдауне (недавно упавшие)

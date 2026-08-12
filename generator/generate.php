@@ -689,6 +689,223 @@ $TF_HINTS = [
 if (defined('GEN_INCLUDE')) return;
 $action = $_REQUEST['action'] ?? 'list';
 
+if ($action==='docx_batches'){   // список .docx-пачек из data/docx (вопрос + варианты)
+    require_once __DIR__ . '/docx_import.php';
+    $b = docx_batches();
+    // В список отдаём только счётчики — сами вопросы поедут при импорте пачки.
+    $out = array_map(fn($x)=>['file'=>$x['file'],'name'=>$x['name'],'count'=>$x['count']], $b);
+    echo json_encode(['ok'=>true,'batches'=>$out], JSON_UNESCAPED_UNICODE); exit;
+}
+if ($action==='docx_import'){    // импорт одной пачки в СВОЁ хранилище (не в ленту сайта)
+    require_once __DIR__ . '/docx_import.php';
+    $file = basename((string)($_REQUEST['file'] ?? ''));       // basename: не выпускаем путь за data/docx
+    $path = DOCX_DIR . '/' . $file;
+    if ($file === '' || !is_file($path)) {
+        echo json_encode(['ok'=>false,'error'=>'Пачка не найдена'], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    $questions = docx_parse($path);
+    if (!$questions) { echo json_encode(['ok'=>false,'error'=>'В пачке нет вопросов'], JSON_UNESCAPED_UNICODE); exit; }
+
+    $store = docx_store_load();
+    // Повторный импорт той же пачки не должен плодить дубли: ключ — сам текст вопроса.
+    $seen = [];
+    foreach ($store as $e) { if (!empty($e['question'])) $seen[$e['question']] = true; }
+
+    $now = time(); $added = 0; $skipped = 0; $noArt = 0;
+    foreach ($questions as $q) {
+        if (isset($seen[$q['question']])) { $skipped++; continue; }
+
+        // Сюжеты картинок (image_en) — короткие описания на английском: одно на
+        // вопрос, по одному на вариант. Их потом рисует выбранный провайдер
+        // (сейчас cloudflare). Без image_en картинки не будет.
+        $art = docx_art_prompts($q['question'], $q['options']);
+        if (!$art) $noArt++;
+
+        $opts = [];
+        foreach ($q['options'] as $i => $label) {
+            $o = ['label' => $label];
+            if (!empty($art['options'][$i])) $o['image_en'] = $art['options'][$i];
+            $opts[] = $o;
+        }
+
+        $row = [
+            'id'         => substr(md5($file.'|'.$q['question']), 0, 12),
+            'batch'      => $file,
+            'batch_name' => preg_replace('~\.docx$~ui', '', $file),
+            'created_at' => gmdate('c', $now),
+            'question'   => $q['question'],
+            'options'    => $opts,
+        ];
+        if (!empty($art['event'])) $row['image_en'] = $art['event'];
+        $store[] = $row;
+        $seen[$q['question']] = true; $added++;
+    }
+    docx_store_save($store);
+    echo json_encode(['ok'=>true,'added'=>$added,'skipped'=>$skipped,'no_art'=>$noArt,'total'=>count($store)], JSON_UNESCAPED_UNICODE); exit;
+}
+if ($action==='docx_list'){      // всё, что импортировано (для страницы)
+    require_once __DIR__ . '/docx_import.php';
+    echo json_encode(['ok'=>true,'items'=>array_values(docx_store_load())], JSON_UNESCAPED_UNICODE); exit;
+}
+if ($action==='docx_delete'){    // удалить один вопрос или всю пачку
+    require_once __DIR__ . '/docx_import.php';
+    $id    = (string)($_REQUEST['id'] ?? '');
+    $batch = (string)($_REQUEST['batch'] ?? '');
+    $store = docx_store_load();
+    $before = count($store);
+    $store = array_values(array_filter($store, function($e) use ($id, $batch){
+        if ($id !== '')    return ($e['id'] ?? '') !== $id;
+        if ($batch !== '') return ($e['batch'] ?? '') !== $batch;
+        return true;
+    }));
+    docx_store_save($store);
+    echo json_encode(['ok'=>true,'removed'=>$before-count($store),'total'=>count($store)], JSON_UNESCAPED_UNICODE); exit;
+}
+if ($action==='docx_gallery'){   // набор настоящих фото человека — листать и выбирать
+    require_once __DIR__ . '/docx_import.php';
+    require_once __DIR__ . '/person_gallery.php';
+    $id  = (string)($_REQUEST['id'] ?? '');
+    $opt = $_REQUEST['opt'] ?? '';
+
+    $store = docx_store_load();
+    $idx = null;
+    foreach ($store as $i => $e) { if (($e['id'] ?? '') === $id) { $idx = $i; break; } }
+    if ($idx === null) { echo json_encode(['ok'=>false,'error'=>'Вопрос не найден'], JSON_UNESCAPED_UNICODE); exit; }
+
+    $text = $store[$idx]['question'];
+    if ($opt !== '') $text .= ' ' . ($store[$idx]['options'][(int)$opt]['label'] ?? '');
+
+    $sets = gallery_for($text);
+    if (!$sets) { echo json_encode(['ok'=>false,'error'=>'В вопросе нет известного человека'], JSON_UNESCAPED_UNICODE); exit; }
+    echo json_encode(['ok'=>true,'sets'=>$sets], JSON_UNESCAPED_UNICODE); exit;
+}
+if ($action==='docx_setphoto'){  // поставить выбранное из галереи фото
+    require_once __DIR__ . '/docx_import.php';
+    $id  = (string)($_REQUEST['id'] ?? '');
+    $opt = $_REQUEST['opt'] ?? '';
+    $url = (string)($_REQUEST['url'] ?? '');
+    // Ставим только то, что лежит в нашей папке портретов.
+    if (!preg_match('~^data/persons/[\w.]+\.webp$~', $url)) {
+        echo json_encode(['ok'=>false,'error'=>'Неизвестный адрес фото'], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    $store = docx_store_load();
+    $idx = null;
+    foreach ($store as $i => $e) { if (($e['id'] ?? '') === $id) { $idx = $i; break; } }
+    if ($idx === null) { echo json_encode(['ok'=>false,'error'=>'Вопрос не найден'], JSON_UNESCAPED_UNICODE); exit; }
+
+    if ($opt !== '') $store[$idx]['options'][(int)$opt]['image_url'] = $url;
+    else             $store[$idx]['image_url'] = $url;
+    docx_store_save($store);
+    echo json_encode(['ok'=>true,'url'=>$url], JSON_UNESCAPED_UNICODE); exit;
+}
+if ($action==='docx_photo'){     // подставить настоящее фото человека вместо рисованного
+    require_once __DIR__ . '/docx_import.php';
+    require_once __DIR__ . '/person_photo.php';
+    $id  = (string)($_REQUEST['id'] ?? '');
+    $opt = $_REQUEST['opt'] ?? '';
+
+    $store = docx_store_load();
+    $idx = null;
+    foreach ($store as $i => $e) { if (($e['id'] ?? '') === $id) { $idx = $i; break; } }
+    if ($idx === null) { echo json_encode(['ok'=>false,'error'=>'Вопрос не найден'], JSON_UNESCAPED_UNICODE); exit; }
+
+    // Ищем имя и в тексте вопроса, и в подписи варианта: «Орбан» может стоять
+    // только в вопросе, а вариантом быть «В октябре».
+    $text = $store[$idx]['question'];
+    if ($opt !== '') $text .= ' ' . ($store[$idx]['options'][(int)$opt]['label'] ?? '');
+
+    $url = person_photo_for($text);
+    if (!$url) { echo json_encode(['ok'=>false,'error'=>'В вопросе нет известного человека'], JSON_UNESCAPED_UNICODE); exit; }
+
+    if ($opt !== '') $store[$idx]['options'][(int)$opt]['image_url'] = $url;
+    else             $store[$idx]['image_url'] = $url;
+    docx_store_save($store);
+    echo json_encode(['ok'=>true,'url'=>$url], JSON_UNESCAPED_UNICODE); exit;
+}
+if ($action==='docx_reprompt'){  // переписать сюжеты (промты) одного вопроса по текущим правилам
+    require_once __DIR__ . '/docx_import.php';
+    $id = (string)($_REQUEST['id'] ?? '');
+
+    $store = docx_store_load();
+    $idx = null;
+    foreach ($store as $i => $e) { if (($e['id'] ?? '') === $id) { $idx = $i; break; } }
+    if ($idx === null) { echo json_encode(['ok'=>false,'error'=>'Вопрос не найден'], JSON_UNESCAPED_UNICODE); exit; }
+
+    $labels = array_map(fn($o) => $o['label'], $store[$idx]['options'] ?? []);
+    $art = docx_art_prompts($store[$idx]['question'], $labels);
+    if (!$art) { echo json_encode(['ok'=>false,'error'=>'Не удалось получить сюжет'], JSON_UNESCAPED_UNICODE); exit; }
+
+    // Промты переписаны — прежние картинки к ним больше не относятся, снимаем ссылки.
+    $store[$idx]['image_en'] = $art['event'];
+    unset($store[$idx]['image_url']);
+    foreach (($store[$idx]['options'] ?? []) as $k => $o) {
+        if (!empty($art['options'][$k])) $store[$idx]['options'][$k]['image_en'] = $art['options'][$k];
+        unset($store[$idx]['options'][$k]['image_url']);
+    }
+    docx_store_save($store);
+    echo json_encode(['ok'=>true,'event'=>$art['event'],'options'=>array_values($art['options'] ?? [])], JSON_UNESCAPED_UNICODE); exit;
+}
+if ($action==='docx_unrender'){  // убрать картинку у вопроса или варианта (вернуть заглушку)
+    require_once __DIR__ . '/docx_import.php';
+    $id  = (string)($_REQUEST['id'] ?? '');
+    $opt = $_REQUEST['opt'] ?? '';                       // '' = картинка вопроса, иначе индекс варианта
+
+    $store = docx_store_load();
+    $idx = null;
+    foreach ($store as $i => $e) { if (($e['id'] ?? '') === $id) { $idx = $i; break; } }
+    if ($idx === null) { echo json_encode(['ok'=>false,'error'=>'Вопрос не найден'], JSON_UNESCAPED_UNICODE); exit; }
+
+    // Снимаем только ссылку. Сам webp остаётся в кэше: он общий для всех, у кого
+    // тот же сюжет и затравка, — удаление файла сломало бы им картинку.
+    if ($opt !== '') unset($store[$idx]['options'][(int)$opt]['image_url']);
+    else             unset($store[$idx]['image_url']);
+    docx_store_save($store);
+    echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;
+}
+if ($action==='docx_prompt_save'){  // сохранить отредактированный вручную сюжет и список исключений
+    require_once __DIR__ . '/docx_import.php';
+    $id  = (string)($_REQUEST['id'] ?? '');
+    $opt = $_REQUEST['opt'] ?? '';
+
+    $store = docx_store_load();
+    $idx = null;
+    foreach ($store as $i => $e) { if (($e['id'] ?? '') === $id) { $idx = $i; break; } }
+    if ($idx === null) { echo json_encode(['ok'=>false,'error'=>'Вопрос не найден'], JSON_UNESCAPED_UNICODE); exit; }
+
+    $val = trim((string)($_REQUEST['image_en'] ?? ''));
+    if ($opt !== '') $store[$idx]['options'][(int)$opt]['image_en'] = $val;
+    else             $store[$idx]['image_en'] = $val;
+
+    docx_store_save($store);
+    echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;
+}
+if ($action==='docx_render'){    // нарисовать/перерисовать картинку вопроса или варианта
+    require_once __DIR__ . '/docx_import.php';
+    $id  = (string)($_REQUEST['id'] ?? '');
+    $opt = $_REQUEST['opt'] ?? '';                       // '' = картинка вопроса, иначе индекс варианта
+    $force = !empty($_REQUEST['force']);                 // перерисовать, даже если уже есть
+
+    $store = docx_store_load();
+    $idx = null;
+    foreach ($store as $i => $e) { if (($e['id'] ?? '') === $id) { $idx = $i; break; } }
+    if ($idx === null) { echo json_encode(['ok'=>false,'error'=>'Вопрос не найден'], JSON_UNESCAPED_UNICODE); exit; }
+
+    $isOpt   = ($opt !== '');
+    $subject = $isOpt ? ($store[$idx]['options'][(int)$opt]['image_en'] ?? '') : ($store[$idx]['image_en'] ?? '');
+    if ($subject === '') { echo json_encode(['ok'=>false,'error'=>'Нет сюжета для картинки'], JSON_UNESCAPED_UNICODE); exit; }
+
+    $seedSrc = $isOpt ? ($store[$idx]['options'][(int)$opt]['label'] ?? '') : $id;
+    $r = docx_render_image($subject, $seedSrc, $isOpt ? 128 : 512, $force);
+    if (!$r['ok']) { echo json_encode(['ok'=>false,'error'=>$r['error']], JSON_UNESCAPED_UNICODE); exit; }
+
+    // Запоминаем адрес готового файла, чтобы страница показала картинку сразу.
+    if ($isOpt) $store[$idx]['options'][(int)$opt]['image_url'] = $r['url'];
+    else        $store[$idx]['image_url'] = $r['url'];
+    docx_store_save($store);
+    echo json_encode(['ok'=>true,'url'=>$r['url']], JSON_UNESCAPED_UNICODE); exit;
+}
 if ($action==='presets'){ echo json_encode(['ok'=>true,'presets'=>$PRESETS], JSON_UNESCAPED_UNICODE); exit; }
 if ($action==='meta'){ echo json_encode(['ok'=>true,'categories'=>$CATS,'timeframes'=>$TF_HINTS], JSON_UNESCAPED_UNICODE); exit; }
 if ($action==='pools'){   // какие активы есть в каждой код-категории (для показа в лайв-каналах)

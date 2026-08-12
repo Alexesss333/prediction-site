@@ -284,3 +284,9 @@ a{color:var(--accent);text-decoration:none}
 .ev-opt-thumb em{font-style:normal;font-size:11px;color:var(--text);white-space:normal;line-height:1.25;min-width:0}
 /* --- баннер ошибки новостей человеческим языком --- */
 .news-err{margin:2px 0 12px;padding:10px 13px;border-radius:10px;background:#3a1b1b;border:1px solid #c0392b;color:#f0b9b2;font-size:13px;line-height:1.4}
+/* --- импорт вопросов из .docx: список пачек --- */
+.dx-list{margin:10px 0}
+.dx-row{display:flex;align-items:center;gap:12px;padding:8px 10px;border-radius:8px;
+  background:#0f131b;border:1px solid #1e2634;margin-bottom:6px}
+.dx-row .dx-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dx-row .dx-count{color:var(--muted);font-size:12px;white-space:nowrap}

@@ -83,7 +83,53 @@ function buildCats(cats){
   const html = Object.entries(groups).map(([g, items]) =>
     `<optgroup label="${g}">` + items.map(c => `<option value="${c.code}">${c.label}</option>`).join('') + `</optgroup>`
   ).join('');
-  ['category','ag_category'].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = html; });
+  ['category','ag_category','dx_category'].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = html; });
+}
+
+/* ---------- импорт вопросов из .docx ---------- */
+function dxLog(msg){
+  const el = document.getElementById('dx_log');
+  if (!el) return;
+  const t = new Date().toLocaleTimeString();
+  el.textContent = `[${t}] ${msg}\n` + el.textContent;
+}
+
+async function dxLoad(){
+  const box = document.getElementById('dx_list');
+  box.textContent = 'Читаю пачки...';
+  const j = await api({action:'docx_batches'});
+  if (!j.ok){ box.textContent = 'Ошибка: ' + (j.error || 'не удалось прочитать'); return; }
+  if (!j.batches.length){ box.textContent = 'В data/docx нет файлов .docx'; return; }
+
+  const total = j.batches.reduce((s,b)=>s+b.count, 0);
+  box.innerHTML = `<div class="muted" style="margin-bottom:8px">Пачек: ${j.batches.length} · вопросов: ${total}</div>` +
+    j.batches.map(b =>
+      `<div class="dx-row">
+         <span class="dx-name">${b.name}</span>
+         <span class="dx-count">${b.count} вопр.</span>
+         <button class="btn" onclick="dxImport(this, '${encodeURIComponent(b.file)}')">Импортировать</button>
+       </div>`
+    ).join('');
+  dxLog(`найдено пачек: ${j.batches.length}, вопросов: ${total}`);
+}
+
+async function dxImport(btn, fileEnc){
+  const file = decodeURIComponent(fileEnc);
+  btn.disabled = true; btn.textContent = 'Импортирую...';
+  const j = await api({
+    action:    'docx_import',
+    file:      file,
+    category:  document.getElementById('dx_category').value,
+    ttl:       document.getElementById('dx_ttl').value,
+    timeframe: document.getElementById('dx_ttl').selectedOptions[0].textContent,
+  });
+  if (j.ok){
+    dxLog(`✔ ${file}: добавлено ${j.added}, пропущено дублей ${j.skipped}. Всего событий: ${j.total}`);
+    btn.textContent = j.added ? `+${j.added}` : 'уже есть';
+  } else {
+    dxLog(`✖ ${file}: ${j.error || 'ошибка'}`);
+    btn.textContent = 'ошибка'; btn.disabled = false;
+  }
 }
 
 /* ---------- авто-генерация (бесконечно, на сервере) ---------- */

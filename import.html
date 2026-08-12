@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Импорт вопросов из Word</title>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  .imp-wrap{max-width:1100px;margin:0 auto;padding:20px}
+  .imp-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:16px}
+  .imp-head h1{margin:0;font-size:20px}
+  .imp-head .spacer{flex:1}
+  .batch{display:flex;align-items:center;gap:12px;padding:9px 12px;border-radius:9px;
+    background:#0f131b;border:1px solid #1e2634;margin-bottom:6px}
+  .batch .b-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .batch .b-count{color:var(--muted);font-size:12px;white-space:nowrap}
+  .q-card{background:#0f131b;border:1px solid #1e2634;border-radius:12px;padding:14px;margin-bottom:12px}
+  /* вопрос: картинка · текст · кнопки — одной строкой */
+  .q-line{display:flex;gap:14px;align-items:center}
+  .q-text{flex:1;min-width:0;font-size:15px;line-height:1.35}
+  .q-batch{color:var(--muted);font-size:11px;margin-top:4px}
+  .q-acts{display:flex;gap:6px;flex:0 0 auto;align-items:center}
+  .thumb{width:70px;height:70px;border-radius:10px;object-fit:cover;background:#0a0d13;
+    border:1px solid #1e2634;flex:0 0 auto}
+  .thumb.small{width:70px;height:70px}
+  /* Ответы строго в ряд. flex-direction задаём явно: в общем style.css
+     .opts объявлен колонкой (там это карточка события на сайте), и без
+     этого правила ответы выстраиваются столбиком. */
+  .q-card .opts{display:flex;flex-direction:row;flex-wrap:nowrap;gap:10px;margin-top:12px;
+    overflow-x:auto;padding-bottom:4px;align-items:flex-start}
+  .q-card .opt{display:flex;flex-direction:column;align-items:center;gap:5px;width:190px;
+    flex:0 0 auto;border:0;padding:8px;cursor:default;
+    box-sizing:border-box;border-radius:10px;background:#0c1017}
+  .q-card .opt>*{max-width:100%}
+  /* Обрезку в одну строку задаёт общий style.css — снимаем её явно,
+     иначе длинные подписи обрываются многоточием. */
+  .q-card .opt .lbl{font-size:11px;color:var(--muted);text-align:center;line-height:1.25;
+    overflow-wrap:anywhere;white-space:normal;overflow:visible;text-overflow:clip;
+    display:block;max-width:100%}
+  /* Кнопки переносятся, иначе третья вылезает на соседний столбец. */
+  .q-card .opt-acts{display:flex;gap:4px;flex-wrap:wrap;justify-content:center}
+  .q-card .opt-acts .btn{padding:3px 7px}
+  .pr{width:100%;background:#0a0d13;color:#c9d4e5;border:1px solid #24304a;border-radius:6px;
+      padding:5px 7px;font:12px/1.35 inherit;resize:vertical;margin-top:5px;
+      min-height:74px;box-sizing:border-box}
+  .q-card .opt .pr{min-height:96px;font-size:11px;padding:4px 5px}
+  .pr:focus{outline:0;border-color:#3b5b96}
+  .pr.saved{border-color:#2f7d4f}
+  /* окно выбора настоящего фото */
+  .gal-back{position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:50;display:flex;
+    align-items:center;justify-content:center;padding:24px}
+  .gal{background:#0f131b;border:1px solid #26324a;border-radius:14px;padding:16px;
+    max-width:900px;width:100%;max-height:86vh;overflow:auto}
+  .gal h3{margin:0 0 4px;font-size:16px}
+  .gal .who{color:var(--muted);font-size:12px;margin-bottom:12px}
+  .gal-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}
+  .gal-grid img{width:100%;height:120px;object-fit:cover;border-radius:9px;cursor:pointer;
+    border:2px solid transparent;background:#0a0d13}
+  .gal-grid img:hover{border-color:#3b5b96}
+  .gal-close{float:right;cursor:pointer;color:var(--muted);font-size:20px;line-height:1;
+    background:0;border:0;padding:0 4px}
+  .mini{padding:3px 8px;font-size:11px;border-radius:7px}
+  .empty{color:var(--muted);padding:16px 0}
+  /* пачка = отдельный блок, чтобы файлы не сливались в одну ленту */
+  .grp{margin:0 0 26px;padding:14px;border-radius:14px;background:#0b0e14;border:1px solid #232c3b}
+  .grp-head{display:flex;align-items:center;gap:10px;margin:0 0 12px;padding-bottom:10px;
+    border-bottom:1px solid #1e2634}
+  .grp-head h3{margin:0;font-size:16px}
+  .grp-head .grp-count{color:var(--muted);font-size:12px}
+  .grp-head .spacer{flex:1}
+  .grp .q-card{background:#10141c}
+</style>
+</head>
+<body>
+<div class="imp-wrap">
+
+  <div class="imp-head">
+    <h1>📄 Вопросы из Word</h1>
+    <span class="spacer"></span>
+    <a class="btn" href="admin.html">← В админку</a>
+    <button class="btn" onclick="loadBatches()">🔄 Пачки</button>
+    <button class="btn" onclick="loadItems()">📋 Обновить</button>
+    <button class="btn primary" onclick="renderMissing()">🖼 Дорисовать картинки</button>
+  </div>
+
+  <div class="panel">
+    <h2>Пачки из <code>data/docx</code></h2>
+    <p class="muted">Берутся только вопрос и варианты. Коэффициенты и правила расчёта отбрасываются.
+    Повторный импорт дублей не создаёт. На сайт эти вопросы не выводятся.</p>
+    <div id="batches" class="empty">Нажми «Пачки».</div>
+  </div>
+
+  <div class="panel">
+    <h2>Импортировано <span id="cnt" class="muted"></span></h2>
+    <div id="items" class="empty">Нажми «Обновить».</div>
+  </div>
+
+  <div class="log" id="log">—</div>
+</div>
+
+<script>
+const API = 'generator/generate.php';
+
+async function api(p){
+  const r = await fetch(API + '?' + new URLSearchParams({...p, _: Date.now()}), {cache:'no-store'});
+  const t = await r.text();
+  // PHP может дописать предупреждения перед JSON — берём последний объект строки.
+  const i = t.indexOf('{');
+  try { return JSON.parse(i >= 0 ? t.slice(i) : t); }
+  catch(e){ return {ok:false, error:'сервер вернул не JSON'}; }
+}
+
+function log(m){
+  const el = document.getElementById('log');
+  el.textContent = `[${new Date().toLocaleTimeString()}] ${m}\n` + el.textContent;
+}
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+async function loadBatches(){
+  const box = document.getElementById('batches');
+  box.textContent = 'Читаю...';
+  const j = await api({action:'docx_batches'});
+  if (!j.ok){ box.textContent = 'Ошибка: ' + (j.error||'—'); return; }
+  if (!j.batches.length){ box.textContent = 'В data/docx нет файлов .docx'; return; }
+  const total = j.batches.reduce((s,b)=>s+b.count,0);
+  box.className = '';
+  box.innerHTML = `<div class="muted" style="margin-bottom:8px">Пачек: ${j.batches.length} · вопросов: ${total}</div>` +
+    j.batches.map(b => `
+      <div class="batch">
+        <span class="b-name">${esc(b.name)}</span>
+        <span class="b-count">${b.count} вопр.</span>
+        <button class="btn mini" onclick="importBatch(this,'${encodeURIComponent(b.file)}')">Импортировать</button>
+      </div>`).join('');
+}
+
+async function importBatch(btn, fileEnc){
+  const file = decodeURIComponent(fileEnc);
+  btn.disabled = true; btn.textContent = 'Импорт...';
+  const j = await api({action:'docx_import', file});
+  if (j.ok){
+    log(`✔ ${file}: добавлено ${j.added}, дублей ${j.skipped}${j.no_art ? `, без сюжета ${j.no_art}` : ''}. Всего: ${j.total}`);
+    btn.textContent = j.added ? `+${j.added}` : 'уже есть';
+    loadItems();
+  } else {
+    log(`✖ ${file}: ${j.error||'ошибка'}`);
+    btn.textContent = 'ошибка'; btn.disabled = false;
+  }
+}
+
+let ITEMS = [];
+
+async function loadItems(){
+  const box = document.getElementById('items');
+  // Список перерисовывается целиком, страница на миг схлопывается и прокрутка
+  // слетает наверх. Запоминаем место и высоту, чтобы вернуть взгляд на прежний вопрос.
+  const wasY = window.scrollY;
+  const j = await api({action:'docx_list'});
+  if (!j.ok){ box.textContent = 'Ошибка: ' + (j.error||'—'); return; }
+  const restore = () => {
+    // Если вопросов стало меньше, страница короче — садимся на ближайшее место.
+    const h = document.body.scrollHeight;
+    window.scrollTo({top: Math.min(wasY, Math.max(0, h - window.innerHeight)), behavior:'instant'});
+  };
+  requestAnimationFrame(() => requestAnimationFrame(restore));
+  ITEMS = j.items || [];
+  document.getElementById('cnt').textContent = ITEMS.length ? `— ${ITEMS.length} вопр.` : '';
+  if (!ITEMS.length){ box.className='empty'; box.textContent = 'Пока пусто. Импортируй пачку выше.'; return; }
+
+  // Группируем по пачкам — каждый файл отдельным блоком, как они пришли.
+  const groups = new Map();
+  ITEMS.forEach(e => {
+    const k = e.batch || '—';
+    if (!groups.has(k)) groups.set(k, {name: e.batch_name || k, rows: []});
+    groups.get(k).rows.push(e);
+  });
+
+  const card = e => `
+    <div class="q-card" id="q_${e.id}">
+      <div class="q-line">
+        <img class="thumb" src="${e.image_url ? esc(e.image_url) : 'data/logos/_placeholder.webp'}"
+             alt="" onerror="this.src='data/logos/_placeholder.webp'">
+        <div class="q-text">
+          <b>${esc(e.question)}</b>
+          <textarea class="pr" rows="2" placeholder="сюжет картинки" oninput="fitPrompt(this)"
+            onchange="savePrompt('${e.id}','','image_en',this)">${esc(e.image_en||'')}</textarea>
+        </div>
+        <div class="q-acts">
+          <button class="btn mini" title="Переписать сюжеты по текущим правилам" onclick="reprompt('${e.id}',this)">✏️ Сюжет</button>
+          <button class="btn mini" title="Взять настоящее фото человека" onclick="photo('${e.id}','',this)">👤 Фото</button>
+          <button class="btn mini" onclick="render('${e.id}','',this)">🎨 Вопрос</button>
+          <button class="btn mini" title="Удалить картинку вопроса" onclick="unrender('${e.id}','',this)">🗑</button>
+          <button class="btn mini" onclick="renderAll('${e.id}',this)">🎨 Ответы</button>
+          <button class="btn mini danger" onclick="del('${e.id}')">✕</button>
+        </div>
+      </div>
+      <div class="opts">
+        ${(e.options||[]).map((o,i) => `
+          <div class="opt">
+            <img class="thumb small" src="${o.image_url ? esc(o.image_url) : 'data/logos/_placeholder.webp'}"
+                 alt="" onerror="this.src='data/logos/_placeholder.webp'">
+            <span class="lbl">${esc(o.label)}</span>
+            <textarea class="pr" rows="3" placeholder="сюжет" oninput="fitPrompt(this)"
+              onchange="savePrompt('${e.id}','${i}','image_en',this)">${esc(o.image_en||'')}</textarea>
+            <div class="opt-acts">
+              <button class="btn mini" title="Перерисовать" onclick="render('${e.id}','${i}',this)">🎨</button>
+              <button class="btn mini" title="Настоящее фото человека" onclick="photo('${e.id}','${i}',this)">👤</button>
+              <button class="btn mini danger" title="Удалить картинку" onclick="unrender('${e.id}','${i}',this)">🗑</button>
+            </div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+
+  box.className = '';
+  // Поля подгоняются под свой текст: сюжеты бывают и в две строки, и в шесть.
+  requestAnimationFrame(() => {
+    box.querySelectorAll('textarea.pr').forEach(t => {
+      t.style.height = 'auto';
+      t.style.height = t.scrollHeight + 'px';
+    });
+  });
+  box.innerHTML = [...groups.entries()].map(([file, g]) => `
+    <section class="grp">
+      <div class="grp-head">
+        <h3>📄 ${esc(g.name)}</h3>
+        <span class="grp-count">${g.rows.length} вопр.</span>
+        <span class="spacer"></span>
+        <button class="btn mini" title="Переписать сюжеты всей пачки" onclick="repromptBatch('${encodeURIComponent(file)}',this)">✏️ Сюжеты пачки</button>
+        <button class="btn mini" title="Нарисовать только там, где картинки ещё нет"
+          onclick="renderBatch('${encodeURIComponent(file)}',this,true)">🖼 Дорисовать пачку</button>
+        <button class="btn mini" title="Перерисовать всё заново, включая готовые картинки"
+          onclick="renderBatch('${encodeURIComponent(file)}',this,false)">🎨 Перерисовать пачку</button>
+        <button class="btn mini danger" onclick="delBatch('${encodeURIComponent(file)}')">Удалить пачку</button>
+      </div>
+      ${g.rows.map(card).join('')}
+    </section>`).join('');
+}
+
+async function delBatch(fileEnc){
+  const file = decodeURIComponent(fileEnc);
+  if (!confirm(`Удалить всю пачку «${file}»?`)) return;
+  const j = await api({action:'docx_delete', batch:file});
+  if (j.ok){ log(`пачка удалена: −${j.removed}, осталось ${j.total}`); loadItems(); }
+}
+
+/* Рисует пачку целиком. skipDone — не трогать уже нарисованное:
+   перерисовка идёт с force, иначе провайдер вернёт картинку из кэша. */
+async function renderBatch(fileEnc, btn, skipDone){
+  const file = decodeURIComponent(fileEnc);
+  const rows = ITEMS.filter(e => e.batch === file);
+
+  const jobs = [];
+  for (const e of rows){
+    if (e.image_en && !(skipDone && e.image_url)) jobs.push({id:e.id, opt:''});
+    (e.options||[]).forEach((o, i) => {
+      if (o.image_en && !(skipDone && o.image_url)) jobs.push({id:e.id, opt:String(i)});
+    });
+  }
+  if (!jobs.length){ log(`пачка «${file}»: рисовать нечего`); return; }
+  if (!confirm(`Пачка «${file}»\nБудет нарисовано картинок: ${jobs.length}\n\nПродолжить?`)) return;
+
+  const old = btn.textContent; btn.disabled = true;
+  let done = 0, fail = 0;
+  for (const t of jobs){
+    const j = await api({action:'docx_render', id:t.id, opt:t.opt, force:1});
+    j.ok ? done++ : fail++;
+    btn.textContent = `${done}/${jobs.length}`;
+  }
+  btn.disabled = false; btn.textContent = old;
+  log(`✔ пачка «${file}»: нарисовано ${done}${fail ? `, не вышло ${fail}` : ''}`);
+  loadItems();
+}
+
+/* Правки сюжета и запретов уходят на сервер по уходу из поля.
+   Зелёная рамка на секунду — знак, что сохранилось. */
+function fitPrompt(el){
+  if (el.tagName !== 'TEXTAREA') return;
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
+}
+
+async function savePrompt(id, opt, field, el){
+  fitPrompt(el);
+  const j = await api({action:'docx_prompt_save', id, opt, [field]: el.value});
+  if (!j.ok){ log('✖ не сохранилось: ' + (j.error||'')); return; }
+  el.classList.add('saved');
+  setTimeout(() => el.classList.remove('saved'), 1000);
+}
+
+async function render(id, opt, btn){
+  const old = btn.textContent;
+  btn.disabled = true; btn.textContent = '...';
+  // force=1 — всегда рисуем заново, кнопка ведь и нужна для перегенерации.
+  const j = await api({action:'docx_render', id, opt, force:1});
+  btn.disabled = false; btn.textContent = old;
+  if (!j.ok){ log('✖ ' + (j.error||'не нарисовалось')); return; }
+  log('✔ картинка обновлена');
+  // Подставляем новый файл, не перезагружая список.
+  const card = document.getElementById('q_' + id);
+  const img = opt === '' ? card.querySelector('.thumb') : card.querySelectorAll('.opt .thumb')[Number(opt)];
+  if (img) img.src = j.url + '?t=' + Date.now();
+}
+
+/* Показывает картинку на месте, не перезагружая список. */
+function setThumb(id, opt, url){
+  const card = document.getElementById('q_' + id);
+  const img = opt === '' ? card.querySelector('.thumb') : card.querySelectorAll('.opt .thumb')[Number(opt)];
+  if (img) img.src = url + '?t=' + Date.now();
+  // ITEMS держим в согласии с экраном, иначе «Дорисовать» затрёт фото.
+  const e = ITEMS.find(x => x.id === id);
+  if (e){ if (opt === '') e.image_url = url; else if (e.options[Number(opt)]) e.options[Number(opt)].image_url = url; }
+}
+
+/* Настоящие фото с Викисклада: показываем набор, выбор — щелчком. */
+async function photo(id, opt, btn){
+  const old = btn.textContent;
+  btn.disabled = true; btn.textContent = '...';
+  const j = await api({action:'docx_gallery', id, opt});
+  btn.disabled = false; btn.textContent = old;
+  if (!j.ok){ log('✖ ' + (j.error || 'фото не найдено')); return; }
+
+  const back = document.createElement('div');
+  back.className = 'gal-back';
+  back.innerHTML = `<div class="gal">
+      <button class="gal-close" title="Закрыть">✕</button>
+      <h3>Настоящие фото</h3>
+      <div class="who">${j.sets.map(s => `${esc(s.name)} — ${s.photos.length}`).join(' · ')}. Щёлкни по нужному.</div>
+      ${j.sets.map(s => `<div class="gal-grid">
+        ${s.photos.map(p => `<img src="${esc(p)}" data-url="${esc(p)}" alt="" loading="lazy">`).join('')}
+      </div>`).join('')}
+    </div>`;
+
+  const close = () => back.remove();
+  back.querySelector('.gal-close').onclick = close;
+  back.onclick = ev => { if (ev.target === back) close(); };
+  back.querySelectorAll('.gal-grid img').forEach(im => {
+    im.onclick = async () => {
+      const r = await api({action:'docx_setphoto', id, opt, url: im.dataset.url});
+      if (!r.ok){ log('✖ ' + (r.error || 'не поставилось')); return; }
+      setThumb(id, opt, r.url);
+      log('✔ фото выбрано');
+      close();
+    };
+  });
+  document.body.appendChild(back);
+}
+
+async function reprompt(id, btn){
+  const old = btn.textContent;
+  btn.disabled = true; btn.textContent = '...';
+  const j = await api({action:'docx_reprompt', id});
+  btn.disabled = false; btn.textContent = old;
+  if (!j.ok){ log('✖ ' + (j.error || 'не вышло')); return; }
+  log('✔ сюжет переписан: ' + j.event);
+  // Сюжеты новые — прежние картинки к ним не относятся, список перечитываем.
+  loadItems();
+}
+
+async function repromptBatch(fileEnc, btn){
+  const file = decodeURIComponent(fileEnc);
+  const rows = ITEMS.filter(e => e.batch === file);
+  const old = btn.textContent; btn.disabled = true;
+  let done = 0, fail = 0;
+  for (const e of rows){
+    btn.textContent = `${done+fail+1}/${rows.length}...`;
+    const j = await api({action:'docx_reprompt', id:e.id});
+    j.ok ? done++ : fail++;
+  }
+  btn.disabled = false; btn.textContent = old;
+  log(`✔ «${file}»: сюжетов переписано ${done}${fail ? `, не вышло ${fail}` : ''}`);
+  loadItems();
+}
+
+async function unrender(id, opt, btn){
+  const old = btn.textContent;
+  btn.disabled = true; btn.textContent = '...';
+  const j = await api({action:'docx_unrender', id, opt});
+  btn.disabled = false; btn.textContent = old;
+  if (!j.ok){ log('✖ ' + (j.error || 'не удалось убрать')); return; }
+  // Возвращаем заглушку на месте, без перезагрузки списка.
+  const card = document.getElementById('q_' + id);
+  const img = opt === '' ? card.querySelector('.thumb') : card.querySelectorAll('.opt .thumb')[Number(opt)];
+  if (img) img.src = 'data/logos/_placeholder.webp';
+  // Держим ITEMS в согласии с экраном: иначе «Дорисовать картинки» пропустит эту.
+  const e = ITEMS.find(x => x.id === id);
+  if (e){ if (opt === '') delete e.image_url; else if (e.options[Number(opt)]) delete e.options[Number(opt)].image_url; }
+  log('картинка убрана');
+}
+
+async function renderAll(id, btn){
+  const e = ITEMS.find(x => x.id === id); if (!e) return;
+  const old = btn.textContent; btn.disabled = true;
+  for (let i = 0; i < (e.options||[]).length; i++){
+    btn.textContent = `${i+1}/${e.options.length}...`;
+    const j = await api({action:'docx_render', id, opt:String(i), force:1});
+    if (j.ok){
+      const img = document.getElementById('q_'+id).querySelectorAll('.opt .thumb')[i];
+      if (img) img.src = j.url + '?t=' + Date.now();
+    }
+  }
+  btn.disabled = false; btn.textContent = old;
+  log('✔ варианты перерисованы');
+}
+
+async function renderMissing(){
+  let done = 0, fail = 0;
+  for (const e of ITEMS){
+    if (!e.image_url && e.image_en){
+      const j = await api({action:'docx_render', id:e.id, opt:''});
+      j.ok ? done++ : fail++;
+    }
+    for (let i = 0; i < (e.options||[]).length; i++){
+      const o = e.options[i];
+      if (!o.image_url && o.image_en){
+        const j = await api({action:'docx_render', id:e.id, opt:String(i)});
+        j.ok ? done++ : fail++;
+      }
+    }
+  }
+  log(`дорисовано: ${done}${fail ? `, не вышло: ${fail}` : ''}`);
+  loadItems();
+}
+
+async function del(id){
+  if (!confirm('Удалить вопрос?')) return;
+  const j = await api({action:'docx_delete', id});
+  if (j.ok){ log(`удалено, осталось ${j.total}`); loadItems(); }
+}
+
+loadBatches();
+loadItems();
+</script>
+</body>
+</html>
